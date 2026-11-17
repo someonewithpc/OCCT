@@ -26,24 +26,30 @@
 #include <algorithm>
 #include <GeomInt_IntSS.hxx>
 
+#include <Adaptor3d_CurveOnSurface.hxx>
 #include <Adaptor3d_TopolTool.hxx>
 #include <Adaptor2d_Curve2d.hxx>
 #include <Approx_CurveOnSurface.hxx>
 #include <ElSLib.hxx>
 #include <Extrema_ExtPS.hxx>
+#include <Extrema_GenLocateExtPS.hxx>
+#include <Extrema_POnSurf.hxx>
 #include <Geom2dAdaptor.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
 #include <Geom2dInt_GInter.hxx>
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAdaptor.hxx>
+#include <GeomAdaptor_Curve.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <GeomInt.hxx>
 #include <GeomInt_LineTool.hxx>
 #include <GeomInt_WLApprox.hxx>
 #include <GeomLib_Check2dBSplineCurve.hxx>
 #include <GeomLib_CheckBSplineCurve.hxx>
+#include <GeomLib_CheckCurveOnSurface.hxx>
 #include <GeomProjLib.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
@@ -106,6 +112,119 @@ bool closeCurve(const occ::handle<Geom_BSplineCurve>& theCurve)
     }
   }
   return true;
+}
+
+//==================================================================================================
+
+// Largest distance from the curve to the surface, sampled on theNbIntervals intervals and refined
+// around the worst sample, or theTolerance if that is larger. A local projection bounds the
+// distance from above, so only the points where it exceeds the largest distance so far are
+// projected globally.
+double maxDistanceToSurface(const occ::handle<Geom_Curve>&          theCurve,
+                            const int                               theNbIntervals,
+                            const double                            theTolerance,
+                            const occ::handle<GeomAdaptor_Surface>& theSurface,
+                            GeomAPI_ProjectPointOnSurf&             theProjector)
+{
+  Extrema_GenLocateExtPS aLocator(*theSurface);
+  double                 aMaxDistance = theTolerance;
+  double                 aU = 0.0, aV = 0.0;
+  bool                   hasSeed   = false;
+  const auto             aDistance = [&](const double theParameter) {
+    const gp_Pnt aPoint = theCurve->Value(theParameter);
+    if (hasSeed)
+    {
+      aLocator.Perform(aPoint, aU, aV);
+      if (aLocator.IsDone() && aLocator.SquareDistance() <= aMaxDistance * aMaxDistance)
+      {
+        aLocator.Point().Parameter(aU, aV);
+        return std::sqrt(aLocator.SquareDistance());
+      }
+    }
+    theProjector.Perform(aPoint);
+    hasSeed = theProjector.NbPoints() > 0;
+    if (!hasSeed)
+    {
+      return 0.0;
+    }
+    theProjector.LowerDistanceParameters(aU, aV);
+    aMaxDistance = std::max(aMaxDistance, theProjector.LowerDistance());
+    return theProjector.LowerDistance();
+  };
+
+  const double aFirst = theCurve->FirstParameter();
+  const double aLast  = theCurve->LastParameter();
+  const double aStep  = (aLast - aFirst) / theNbIntervals;
+  double       aWorst = -1.0, aWorstParameter = aFirst, aWorstU = 0.0, aWorstV = 0.0;
+  for (int i = 0; i <= theNbIntervals; i++)
+  {
+    const double aParameter = aFirst + i * aStep;
+    const double aD         = aDistance(aParameter);
+    if (aD > aWorst)
+    {
+      aWorst          = aD;
+      aWorstParameter = aParameter;
+      aWorstU         = aU;
+      aWorstV         = aV;
+    }
+  }
+
+  aU                  = aWorstU;
+  aV                  = aWorstV;
+  const double aRatio = (std::sqrt(5.0) - 1.0) / 2.0;
+  double       aA     = std::max(aFirst, aWorstParameter - aStep);
+  double       aB     = std::min(aLast, aWorstParameter + aStep);
+  double       aX1    = aB - aRatio * (aB - aA);
+  double       aX2    = aA + aRatio * (aB - aA);
+  double       aF1    = aDistance(aX1);
+  double       aF2    = aDistance(aX2);
+  while (aX2 - aX1 > 1.e-3 * aStep)
+  {
+    if (aF1 > aF2)
+    {
+      aB  = aX2;
+      aX2 = aX1;
+      aF2 = aF1;
+      aX1 = aB - aRatio * (aB - aA);
+      aF1 = aDistance(aX1);
+    }
+    else
+    {
+      aA  = aX1;
+      aX1 = aX2;
+      aF1 = aF2;
+      aX2 = aA + aRatio * (aB - aA);
+      aF2 = aDistance(aX2);
+    }
+  }
+  return aMaxDistance;
+}
+
+//==================================================================================================
+
+// Raises theTolerance to the deviation of the curve from the surface: against the p-curve when
+// there is one, as IntTools_FaceFace::ComputeTolReached3d does, otherwise by projection.
+double curveDeviation(const occ::handle<Geom_Curve>&          theCurve,
+                      const occ::handle<Geom2d_Curve>&        thePCurve,
+                      const int                               theNbIntervals,
+                      const double                            theTolerance,
+                      const occ::handle<GeomAdaptor_Surface>& theSurface,
+                      GeomAPI_ProjectPointOnSurf&             theProjector)
+{
+  if (!thePCurve.IsNull())
+  {
+    const double                aFirst = theCurve->FirstParameter();
+    const double                aLast  = theCurve->LastParameter();
+    GeomLib_CheckCurveOnSurface aCheck(new GeomAdaptor_Curve(theCurve, aFirst, aLast),
+                                       Precision::PConfusion());
+    aCheck.Perform(
+      new Adaptor3d_CurveOnSurface(new Geom2dAdaptor_Curve(thePCurve, aFirst, aLast), theSurface));
+    if (aCheck.IsDone())
+    {
+      return std::max(theTolerance, aCheck.MaxDistance());
+    }
+  }
+  return maxDistanceToSurface(theCurve, theNbIntervals, theTolerance, theSurface, theProjector);
 }
 } // namespace
 
@@ -761,6 +880,20 @@ void GeomInt_IntSS::MakeCurve(const int                               Index,
                                     aCurveSurface->VResolution(myTolApprox)));
         }
 
+        GeomAPI_ProjectPointOnSurf aProjector1, aProjector2;
+        aProjector1.Init(aS1,
+                         myHS1->FirstUParameter(),
+                         myHS1->LastUParameter(),
+                         myHS1->FirstVParameter(),
+                         myHS1->LastVParameter(),
+                         Precision::Confusion());
+        aProjector2.Init(aS2,
+                         myHS2->FirstUParameter(),
+                         myHS2->LastUParameter(),
+                         myHS2->FirstVParameter(),
+                         myHS2->LastVParameter(),
+                         Precision::Confusion());
+
         for (i = 1; i <= nbiter; i++)
         {
           if (bIsDecomposited)
@@ -840,14 +973,15 @@ void GeomInt_IntSS::MakeCurve(const int                               Index,
             }
             if (typs1 == GeomAbs_Plane || typs2 == GeomAbs_Plane)
             {
-              myTolReached3d = myTolReached2d;
+              myTolReached3d = std::max(myTolReached3d, myTolReached2d);
             }
             else if (theapp3d.TolReached3d() > myTolReached3d || myTolReached3d == 0.)
             {
               myTolReached3d = theapp3d.TolReached3d();
             }
 
-            int aNbMultiCurves, nbpoles;
+            const int aNbCurves = sline.Length();
+            int       aNbMultiCurves, nbpoles;
             //
             aNbMultiCurves = theapp3d.NbMultiCurves();
             for (j = 1; j <= aNbMultiCurves; j++)
@@ -1061,6 +1195,24 @@ void GeomInt_IntSS::MakeCurve(const int                               Index,
                 }
               } // else { // typs1!=GeomAbs_Plane && typs2!=GeomAbs_Plane
             } // for (j=1; j<=aNbMultiCurves; j++
+
+            // The approximation error is known at the walking points only.
+            const int aNbIntervals = std::max(2 * (ilprm - ifprm), 2);
+            for (j = aNbCurves + 1; j <= sline.Length(); j++)
+            {
+              myTolReached3d = curveDeviation(sline(j),
+                                              slineS1(j),
+                                              aNbIntervals,
+                                              myTolReached3d,
+                                              myHS1,
+                                              aProjector1);
+              myTolReached3d = curveDeviation(sline(j),
+                                              slineS2(j),
+                                              aNbIntervals,
+                                              myTolReached3d,
+                                              myHS2,
+                                              aProjector2);
+            }
           }
         }
       }
