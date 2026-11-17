@@ -236,6 +236,9 @@ static void CompParam(const Geom2dAdaptor_Curve&       Carc,
                          Precision::PIntersection());
 
     double dist = Precision::Infinite(), p1, p2;
+    // The extremity is at preftg, an end of Ctg. A crossing in the far half of Ctg belongs to
+    // its other end, where a pcurve running along the arc can meet it again.
+    const double aHalfRange = 0.5 * std::abs(Ctg->LastParameter() - Ctg->FirstParameter());
     if (Intersection.IsDone())
     {
       if (!Intersection.IsEmpty())
@@ -253,7 +256,7 @@ static void CompParam(const Geom2dAdaptor_Curve&       Carc,
           int2d = Intersection.Point(i);
           p1    = int2d.ParamOnFirst();
           p2    = int2d.ParamOnSecond();
-          if (std::abs(prefarc - p2) < dist)
+          if (std::abs(prefarc - p2) < dist && std::abs(p1 - preftg) <= aHalfRange)
           {
             ptg   = p1;
             parc  = p2;
