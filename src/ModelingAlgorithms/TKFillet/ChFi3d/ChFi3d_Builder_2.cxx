@@ -1877,6 +1877,35 @@ static int sectionEndPointIndex(const ChFiDS_CommonPoint&   theFirst,
   return ChFi3d_IndexPointInDS(theSecond, theDS);
 }
 
+//==================================================================================================
+
+// Sets the tolerances of the two end points of a section from the boxes of the curve ends and
+// arc points each one joins. A box also holds its point, which the refinement of the arc
+// parameter does not move. A point shared by a collapsed section covers both boxes.
+static void setSectionEndTolerances(TopOpeBRepDS_DataStructure& theDS,
+                                    const ChFiDS_CommonPoint&   thePoint1,
+                                    const ChFiDS_CommonPoint&   thePoint2,
+                                    Bnd_Box&                    theBox1,
+                                    Bnd_Box&                    theBox2,
+                                    const int                   theIndex1,
+                                    const int                   theIndex2)
+{
+  if (!thePoint1.IsVertex())
+  {
+    theBox1.Add(theDS.Point(theIndex1).Point());
+    ChFi3d_SetPointTolerance(theDS, theBox1, theIndex1);
+  }
+  if (!thePoint2.IsVertex())
+  {
+    if (!thePoint1.IsVertex() && theIndex2 == theIndex1)
+    {
+      theBox2.Add(theBox1);
+    }
+    theBox2.Add(theDS.Point(theIndex2).Point());
+    ChFi3d_SetPointTolerance(theDS, theBox2, theIndex2);
+  }
+}
+
 } // namespace
 
 //==================================================================================================
@@ -1950,14 +1979,13 @@ static void ChFi3d_MakeExtremities(occ::handle<ChFiDS_Stripe>& Stripe,
       }
       ChFi3d_EnlargeBox(DStr, Stripe, SDF, b1, b2, true);
       ChFi3d_EnlargeBox(DStr, Stripe, SDL, b1, b2, false);
-      if (!CV1.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b1, Stripe->IndexFirstPointOnS1());
-      }
-      if (!CV2.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b2, Stripe->IndexFirstPointOnS2());
-      }
+      setSectionEndTolerances(DStr,
+                              CV1,
+                              CV2,
+                              b1,
+                              b2,
+                              Stripe->IndexFirstPointOnS1(),
+                              Stripe->IndexFirstPointOnS2());
     }
     else
     {
@@ -2046,14 +2074,13 @@ static void ChFi3d_MakeExtremities(occ::handle<ChFiDS_Stripe>& Stripe,
         ChFi3d_EnlargeBox(cpdeb2.Arc(), EFMap(cpdeb2.Arc()), cpdeb2.ParameterOnArc(), b2);
       }
       ChFi3d_EnlargeBox(DStr, Stripe, SDdeb, b1, b2, true);
-      if (!cpdeb1.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b1, Stripe->IndexFirstPointOnS1());
-      }
-      if (!cpdeb2.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b2, Stripe->IndexFirstPointOnS2());
-      }
+      setSectionEndTolerances(DStr,
+                              cpdeb1,
+                              cpdeb2,
+                              b1,
+                              b2,
+                              Stripe->IndexFirstPointOnS1(),
+                              Stripe->IndexFirstPointOnS2());
     }
     else
     { // Case of a singular extremity
@@ -2138,14 +2165,13 @@ static void ChFi3d_MakeExtremities(occ::handle<ChFiDS_Stripe>& Stripe,
         ChFi3d_EnlargeBox(cpfin2.Arc(), EFMap(cpfin2.Arc()), cpfin2.ParameterOnArc(), b2);
       }
       ChFi3d_EnlargeBox(DStr, Stripe, SDfin, b1, b2, false);
-      if (!cpfin1.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b1, Stripe->IndexLastPointOnS1());
-      }
-      if (!cpfin2.IsVertex())
-      {
-        ChFi3d_SetPointTolerance(DStr, b2, Stripe->IndexLastPointOnS2());
-      }
+      setSectionEndTolerances(DStr,
+                              cpfin1,
+                              cpfin2,
+                              b1,
+                              b2,
+                              Stripe->IndexLastPointOnS1(),
+                              Stripe->IndexLastPointOnS2());
     }
     else
     { // Case of the single extremity
