@@ -2262,6 +2262,9 @@ void ChFi3d_FilBuilder::SplitSurf(NCollection_Sequence<occ::handle<ChFiDS_SurfDa
   a         = P.Parameter();
   precedant = P.PointOnS1().Distance(P.PointOnS2());
   ii++;
+  // A minimum is a singularity only where the section opens to tolapp3d on both sides of it.
+  // Next to a collapsed end it stays narrower, and its minima there are noise.
+  double aWidthSinceSplit = std::max(precedant, courant);
 
   // (1.2) Find a minimum by "points"
   for (; ii <= Nbpnt && Line->Point(ii).Parameter() <= VLast; ii++)
@@ -2292,19 +2295,11 @@ void ChFi3d_FilBuilder::SplitSurf(NCollection_Sequence<occ::handle<ChFiDS_SurfDa
         if (Courbe1->EvalD0(racine).SquareDistance(Courbe2->EvalD0(racine)) < tolapp3d * tolapp3d)
         {
           // the solution (avoiding the risks of confusion)
-          if (LesVi.Length() == 0)
+          const double aPrevious = LesVi.IsEmpty() ? VFirst : LesVi.Last();
+          if (aWidthSinceSplit >= tolapp3d && racine > aPrevious + tol2d && racine < VLast - tol2d)
           {
-            if ((racine > VFirst + tol2d) && (racine < VLast - tol2d))
-            {
-              LesVi.Append(racine);
-            }
-          }
-          else
-          {
-            if ((racine > LesVi(LesVi.Length()) + tol2d) && (racine < VLast - tol2d))
-            {
-              LesVi.Append(racine);
-            }
+            LesVi.Append(racine);
+            aWidthSinceSplit = 0.;
           }
         }
       }
@@ -2315,11 +2310,17 @@ void ChFi3d_FilBuilder::SplitSurf(NCollection_Sequence<occ::handle<ChFiDS_SurfDa
 #endif
       }
     }
+    aWidthSinceSplit = std::max(aWidthSinceSplit, suivant);
     // update if non duplication
     a         = b;
     precedant = courant;
     b         = c;
     courant   = suivant;
+  }
+
+  if (!LesVi.IsEmpty() && aWidthSinceSplit < tolapp3d)
+  {
+    LesVi.Remove(LesVi.Length());
   }
 
   // (2) Update of the sequence of SurfData
