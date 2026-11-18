@@ -2017,8 +2017,11 @@ bool ChFi3d_Builder::ComputeData(occ::handle<ChFiDS_SurfData>&           Data,
 
   bool unseulsuffitdeb = (intf >= 2);
   bool unseulsuffitfin = (intl >= 2);
-  bool noproldeb       = (intf >= 3);
-  bool noprolfin       = (intl >= 3);
+  // A tangency extremity (4) still lets the walking go on to the end of the guide when only
+  // one contact left its face: a section that does not collapse at the vertex ends on both
+  // free boundaries.
+  bool noproldeb = (intf >= 3 && intf != 4);
+  bool noprolfin = (intl >= 3 && intl != 4);
 
   double Rab = 0.03 * (SpLast - SpFirst);
 
