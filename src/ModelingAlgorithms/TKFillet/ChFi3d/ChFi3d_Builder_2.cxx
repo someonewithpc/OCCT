@@ -101,6 +101,21 @@ static inline occ::handle<Geom2d_Curve> getCurveOnSurface(const TopoDS_Edge& the
   return BRep_Tool::CurveOnSurface(theEdge, theFace, aFirstParam, aLastParam);
 }
 
+// Both ends on one arc means the section collapsed onto it. The fillet pcurves meet the arc
+// at a small angle there, so the two crossings can lie apart along the arc by more than the
+// tolerance, but not by more than the tolerances of the two points.
+static bool isCollapsedSection(const ChFiDS_CommonPoint& theFirst,
+                               const ChFiDS_CommonPoint& theSecond,
+                               const double              theTolerance)
+{
+  double aTolerance = theTolerance;
+  if (theFirst.IsOnArc() && theSecond.IsOnArc() && theFirst.Arc().IsSame(theSecond.Arc()))
+  {
+    aTolerance = std::max(aTolerance, theFirst.Tolerance() + theSecond.Tolerance());
+  }
+  return theFirst.Point().IsEqual(theSecond.Point(), aTolerance);
+}
+
 //===================================================================
 //   Definition by a plane
 //
@@ -129,7 +144,7 @@ static void ChFi3d_CoupeParPlan(const ChFiDS_CommonPoint&         compoint1,
 {
   // A collapsed section does not define a stable cutting plane.
   // Its boundary is built from the two surface parameters.
-  if (compoint1.Point().IsEqual(compoint2.Point(), tol3d))
+  if (isCollapsedSection(compoint1, compoint2, tol3d))
   {
     plane = false;
     return;
@@ -1860,22 +1875,14 @@ namespace
 //==================================================================================================
 
 // Shares a generated point at a collapsed section, retaining source vertex identities.
-// Both ends on one arc means the section collapsed onto it. The fillet pcurves meet the arc
-// at a small angle there, so the two crossings can lie apart along the arc by more than the
-// tolerance, but not by more than the tolerances of the two points.
 static int sectionEndPointIndex(const ChFiDS_CommonPoint&   theFirst,
                                 const ChFiDS_CommonPoint&   theSecond,
                                 const int                   theFirstIndex,
                                 TopOpeBRepDS_DataStructure& theDS,
                                 const double                theTolerance)
 {
-  double aTolerance = theTolerance;
-  if (theFirst.IsOnArc() && theSecond.IsOnArc() && theFirst.Arc().IsSame(theSecond.Arc()))
-  {
-    aTolerance = std::max(aTolerance, theFirst.Tolerance() + theSecond.Tolerance());
-  }
   if (!theFirst.IsVertex() && !theSecond.IsVertex()
-      && theFirst.Point().IsEqual(theSecond.Point(), aTolerance))
+      && isCollapsedSection(theFirst, theSecond, theTolerance))
   {
     TopOpeBRepDS_Point& aPoint = theDS.ChangePoint(theFirstIndex);
     aPoint.Tolerance(std::max(aPoint.Tolerance(),
