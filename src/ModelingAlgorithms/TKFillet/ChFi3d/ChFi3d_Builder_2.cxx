@@ -1860,14 +1860,22 @@ namespace
 //==================================================================================================
 
 // Shares a generated point at a collapsed section, retaining source vertex identities.
+// Both ends on one arc means the section collapsed onto it. The fillet pcurves meet the arc
+// at a small angle there, so the two crossings can lie apart along the arc by more than the
+// tolerance, but not by more than the tolerances of the two points.
 static int sectionEndPointIndex(const ChFiDS_CommonPoint&   theFirst,
                                 const ChFiDS_CommonPoint&   theSecond,
                                 const int                   theFirstIndex,
                                 TopOpeBRepDS_DataStructure& theDS,
                                 const double                theTolerance)
 {
+  double aTolerance = theTolerance;
+  if (theFirst.IsOnArc() && theSecond.IsOnArc() && theFirst.Arc().IsSame(theSecond.Arc()))
+  {
+    aTolerance = std::max(aTolerance, theFirst.Tolerance() + theSecond.Tolerance());
+  }
   if (!theFirst.IsVertex() && !theSecond.IsVertex()
-      && theFirst.Point().IsEqual(theSecond.Point(), theTolerance))
+      && theFirst.Point().IsEqual(theSecond.Point(), aTolerance))
   {
     TopOpeBRepDS_Point& aPoint = theDS.ChangePoint(theFirstIndex);
     aPoint.Tolerance(std::max(aPoint.Tolerance(),
