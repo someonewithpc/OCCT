@@ -3889,6 +3889,32 @@ namespace
 static const double CosRef2D = std::cos(M_PI / 9.0), AngRef2D = M_PI / 2.0;
 
 static const double d = 7.0;
+
+// Sines of the angle between the surfaces: below the first the intersection is near-tangent,
+// below the second a step counts as reaching the tangent contact.
+constexpr double THE_NEAR_TANGENT_SIN = 0.2;
+constexpr double THE_CONTACT_SIN      = 1.0e-3;
+
+// Sine of the angle between the surface normals at thePoint, or -1 if a normal is undefined.
+double sinBetweenSurfaces(const occ::handle<Adaptor3d_Surface>& theSurface1,
+                          const occ::handle<Adaptor3d_Surface>& theSurface2,
+                          const IntSurf_PntOn2S&                thePoint)
+{
+  double aU1, aV1, aU2, aV2;
+  thePoint.Parameters(aU1, aV1, aU2, aV2);
+  gp_Pnt aPoint;
+  gp_Vec aD1U, aD1V, aD2U, aD2V;
+  Adaptor3d_HSurfaceTool::D1(theSurface1, aU1, aV1, aPoint, aD1U, aD1V);
+  Adaptor3d_HSurfaceTool::D1(theSurface2, aU2, aV2, aPoint, aD2U, aD2V);
+  const gp_Vec aNormal1 = aD1U.Crossed(aD1V);
+  const gp_Vec aNormal2 = aD2U.Crossed(aD2V);
+  const double aLengths = aNormal1.Magnitude() * aNormal2.Magnitude();
+  if (aLengths <= gp::Resolution())
+  {
+    return -1.0;
+  }
+  return aNormal1.Crossed(aNormal2).Magnitude() / aLengths;
+}
 } // namespace
 
 IntWalk_StatusDeflection IntWalk_PWalking::TestDeflection(const IntImp_ConstIsoparametric choixIso,
@@ -4169,6 +4195,27 @@ IntWalk_StatusDeflection IntWalk_PWalking::TestDeflection(const IntImp_ConstIsop
     }
   }
   //<-OCC431(apo)
+  if (aStatus != IntWalk_PointConfondu)
+  {
+    // The 3D and UV tests below do not see the surfaces closing in to a tangent contact,
+    // where the approximation needs points. Keep the angle between the surfaces from
+    // changing by more than a factor of 2 per step once it is small.
+    const double aSinPrevious = sinBetweenSurfaces(Caro1, Caro2, previousPoint);
+    const double aSinCurrent  = sinBetweenSurfaces(Caro1, Caro2, CurrentPoint);
+    const double aSinLow      = std::min(aSinPrevious, aSinCurrent);
+    const double aSinHigh     = std::max(aSinPrevious, aSinCurrent);
+    if (aSinLow >= 0.0 && aSinLow < THE_NEAR_TANGENT_SIN && aSinHigh > 2.0 * aSinLow
+        && aSinHigh > THE_CONTACT_SIN
+        && (pasuv[0] * 0.5 >= ResoU1 || pasuv[1] * 0.5 >= ResoV1 || pasuv[2] * 0.5 >= ResoU2
+            || pasuv[3] * 0.5 >= ResoV2))
+    {
+      pasuv[0] *= 0.5;
+      pasuv[1] *= 0.5;
+      pasuv[2] *= 0.5;
+      pasuv[3] *= 0.5;
+      return IntWalk_PasTropGrand;
+    }
+  }
   if (isInflexionRecovery)
   {
     // Keep the recovery step only after validating the UV direction.
