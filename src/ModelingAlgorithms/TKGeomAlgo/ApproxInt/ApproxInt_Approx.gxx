@@ -20,6 +20,7 @@
 #include <IntSurf_LineOn2S.hxx>
 #include <IntSurf_PntOn2S.hxx>
 #include <IntSurf_Quadric.hxx>
+#include <NCollection_Sequence.hxx>
 #include <Precision.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Trsf2d.hxx>
@@ -105,23 +106,46 @@ static double chordTurn(const IntSurf_LineOn2S& theLine, const int theIndex)
 
 //=================================================================================================
 
+// Length of the chord from point theIndex of theLine to the next one, 0 outside the line.
+static double chordLength(const IntSurf_LineOn2S& theLine, const int theIndex)
+{
+  if (theIndex < 1 || theIndex >= theLine.NbPoints())
+  {
+    return 0.0;
+  }
+  return theLine.Value(theIndex).Value().Distance(theLine.Value(theIndex + 1).Value());
+}
+
+//=================================================================================================
+
 // The fit is checked only at the line points, and the walking bounds the sag of a step
 // rather than its turn. Where the parametrization runs straight along a small radius, e.g.
 // around a torus tube, consecutive points can then be too far apart for the curve between
-// them to be determined. Insert intersection points into segments whose chords turn by more
-// than aMaxChordTurn. Returns theLine unchanged when no point is inserted.
-static occ::handle<TheWLine> refineTurningSegments(const occ::handle<TheWLine>& theLine,
-                                                   int&                         theIndexMin,
-                                                   int&                         theIndexMax,
-                                                   ApproxInt_SvSurfaces&        theSurfaces)
+// them to be determined. The same goes for a step much longer than the steps next to it.
+// Insert intersection points into segments whose chords turn by more than aMaxChordTurn,
+// and into a walking step until its pieces are at most aMaxChordRatio times as long as the
+// longer of its neighbors. Returns theLine unchanged when no point is inserted.
+static occ::handle<TheWLine> refineSparseSegments(const occ::handle<TheWLine>& theLine,
+                                                  int&                         theIndexMin,
+                                                  int&                         theIndexMax,
+                                                  ApproxInt_SvSurfaces&        theSurfaces)
 {
-  constexpr double aMaxChordTurn = 0.2;
-  constexpr int    aNbPasses     = 3;
+  constexpr double aMaxChordTurn  = 0.2;
+  constexpr double aMaxChordRatio = 4.0;
+  constexpr int    aNbPasses      = 3;
 
   occ::handle<IntSurf_LineOn2S> aPoints = new IntSurf_LineOn2S();
   for (int i = theIndexMin; i <= theIndexMax; ++i)
   {
     aPoints->Add(theLine->Point(i));
+  }
+
+  // Limits come from the walking steps, so that the pieces of a split step do not raise them.
+  NCollection_Sequence<double> aMaxChords;
+  for (int i = 1; i < aPoints->NbPoints(); ++i)
+  {
+    aMaxChords.Append(aMaxChordRatio
+                      * std::max(chordLength(*aPoints, i - 1), chordLength(*aPoints, i + 1)));
   }
 
   bool isRefined = false;
@@ -133,7 +157,8 @@ static occ::handle<TheWLine> refineTurningSegments(const occ::handle<TheWLine>& 
     bool toSplit = false;
     for (int i = 1; i < aNbPoints; ++i)
     {
-      if (std::max(chordTurn(*aPoints, i), chordTurn(*aPoints, i + 1)) > aMaxChordTurn)
+      if (std::max(chordTurn(*aPoints, i), chordTurn(*aPoints, i + 1)) > aMaxChordTurn
+          || (aMaxChords(i) > 0.0 && chordLength(*aPoints, i) > aMaxChords(i)))
       {
         aSplit(i) = 1;
         toSplit   = true;
@@ -173,6 +198,7 @@ static occ::handle<TheWLine> refineTurningSegments(const occ::handle<TheWLine>& 
         continue;
       }
       aPoints->InsertBefore(i + 1, aMiddle);
+      aMaxChords.InsertAfter(i, aMaxChords(i));
       isInserted = true;
     }
     if (!isInserted)
@@ -422,7 +448,7 @@ void ApproxInt_Approx::Perform(const ThePSurface&           Surf1,
   int                         anIndexMin = indicemin;
   int                         anIndexMax = indicemax;
   const occ::handle<TheWLine> aLine =
-    refineTurningSegments(theline, anIndexMin, anIndexMax, myPrmPrmSvSurfaces);
+    refineSparseSegments(theline, anIndexMin, anIndexMax, myPrmPrmSvSurfaces);
 
   // Prepare DS.
   prepareDS(ApproxXYZ, ApproxU1V1, ApproxU2V2, anIndexMin, anIndexMax);
