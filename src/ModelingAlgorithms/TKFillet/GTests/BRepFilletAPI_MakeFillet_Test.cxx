@@ -867,7 +867,8 @@ TEST(BRepFilletAPI_MakeFilletTest, ConeCornerIsInvariantUnderRotation)
 
 TEST(BRepFilletAPI_MakeFilletTest, CollapsedFreeBoundarySectionSharesEndpoint)
 {
-  for (const double aShift : {0.0, -0.0005, 0.0005, -0.0002, -0.0014, 0.0013})
+  for (const double aShift :
+       {0.0, -0.0005, 0.0005, -0.0002, -0.0014, 0.0013, -0.00246, -0.00227, 0.0029400000000000008})
   {
     const TopoDS_Edge anArc =
       BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 500), 0, M_PI);
