@@ -1871,6 +1871,13 @@ void BRepBlend_Walking::InternalPerform(Blend_Function& Func,
   {
     stepw = sens * (Bound - parprec) * 0.5;
     param = parprec + sens * stepw;
+    // Half of a short remainder can fall under the 3D resolution, where the walking stops as
+    // on a repeated point short of the bound. One step covers it instead.
+    if (stepw < 2. * tolgui)
+    {
+      stepw *= 2.;
+      param = Bound;
+    }
   }
 
   evalpinit(parinit, previousP, parprec, param, infbound, supbound, clasonS1, clasonS2);
